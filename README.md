@@ -1,46 +1,83 @@
-# Tradeix Interface
+# Tradeix — Shipment Visibility Platform
 
-Two tracks: `/` is the marketing landing page, `/dashboard` is the product
-(Live Map), gated behind real auth.
+**Next.js · TypeScript · SQLite · Session Authentication · Docker**
 
-## Run locally (proven working as of this build)
-```bash
-npm install
-npm run db:migrate   # creates dev.db with the real schema
-npm run db:seed      # seeds a demo user + 5 shipments
-npm run dev           # http://localhost:3000
+Tradeix is a **prototype** for exploring shipment visibility and customer-specific logistics dashboards. It currently uses seeded records, not live carrier or port feeds.
+
+## What you can inspect
+
+| Area | Implementation | Key files |
+| --- | --- | --- |
+| Authentication | Login verifies bcrypt password hashes and issues signed session cookies | `app/api/auth/login/route.ts`, `lib/session.ts` |
+| Protected dashboard | Middleware redirects unauthenticated dashboard visitors to login | `middleware.ts` |
+| Shipment API | Returns 401 without a session; applies customer ID filtering for the `customer` role | `app/api/shipments/route.ts` |
+| Persistence | Local SQLite database with seed and migration scripts | `lib/db.ts`, `scripts/` |
+| Delivery workflow | GitHub Actions workflow and Docker build configuration | `.github/workflows/ci-cd.yml`, `Dockerfile` |
+
+## Request flow
+
+```mermaid
+flowchart TD
+    Browser[Browser] --> Login[Login API]
+    Login --> Users[(SQLite users)]
+    Login --> Cookie[Signed session cookie]
+    Browser --> Middleware[Dashboard middleware]
+    Cookie --> Middleware
+    Middleware --> Dashboard[Dashboard]
+    Browser --> API[Shipments API]
+    Cookie --> API
+    API --> Auth{Valid session?}
+    Auth -->|No| Unauthorized[401 response]
+    Auth -->|Yes| Scope[Apply role-based query scope]
+    Scope --> DB[(SQLite shipments)]
+    DB --> API
 ```
 
-Demo login: `demo@tradeix.com` / `demo1234`
+**Security boundary:** The shipment endpoint applies `customer_id = ?` for users with the `customer` role. Other roles currently use broader access; production authorization rules require further review. A separate open pull request addresses production session-secret configuration.
 
-- `/` — landing page, no auth needed
-- `/dashboard` — redirects to `/login` if you're not signed in
-- `/api/shipments` — returns 401 without a session; with one, returns only
-  that user's shipments (verified directly with curl — see roadmap doc)
+## Run locally
 
-## What's real right now
-- SQLite database (`dev.db`), created by `scripts/migrate.ts`, same shape as `schema.sql`
-- bcrypt password hashing + JWT session cookies (`lib/session.ts`)
-- `middleware.ts` actually blocks `/dashboard` without a valid session
-- `/api/shipments` actually queries the database and scopes rows to the
-  logged-in customer — not a client-side filter, an actual `WHERE customer_id = ?`
-- Production build verified clean: `npx next build` — 11 routes compiled,
-  zero errors
+Requires Node.js 20 and npm.
 
-## Build & run in Docker
+```bash
+npm ci
+npm run db:migrate
+npm run db:seed
+npm run dev
+```
+
+Visit `http://localhost:3000`. Seeded demo credentials (for local development only): `demo@tradeix.com` / `demo1234`.
+
+## Verify
+
+```bash
+npm test
+npm run build
+```
+
+The GitHub Actions workflow also includes linting and a container image scan. **A configured workflow is not evidence that every job currently passes.** Inspect the [Actions tab](https://github.com/akashphilipvarghese-code/tradeix-platform/actions) for actual run results.
+
+## Docker
+
 ```bash
 docker build -t tradeix-interface .
 docker run -p 3000:3000 --env-file .env tradeix-interface
-curl http://localhost:3000/api/health
 ```
 
-## CI/CD
-`.github/workflows/ci-cd.yml`: lint → test → build → container vulnerability
-scan → deploy (placeholder — no target infra provisioned yet).
+Configure a unique `SESSION_SECRET` for any nonlocal deployment. See the [open session-hardening PR](https://github.com/akashphilipvarghese-code/tradeix-platform/pull/2) for production fail-closed enforcement; until merged, the default branch retains a development fallback.
 
-## What's not wired yet
-- Real shipment data — seed data only, no AIS/carrier/port API integration
-- Postgres for production (currently SQLite; swap the `db.ts`/`scripts/*`
-  layer when Phase 5 infra exists — schema.sql is already Postgres-shaped)
-- Deploy target, secrets, real rollback
-- Legal pages (privacy policy, terms)
+## Not production-ready
+
+- Shipment records are seeded; there is no live AIS, carrier, or port integration.
+- The database is local SQLite, not a production database deployment.
+- CI includes a deployment **placeholder**, not a working production rollout.
+- Production secrets, role permissions, operational monitoring, rollback, and legal pages need review.
+- There is no verified public deployment or independently reproduced performance benchmark.
+
+## Next engineering priorities
+
+1. Pass CI and merge reviewed security and workflow fixes.
+2. Add integration tests for customer isolation, login failures, and role permissions.
+3. Document database migration and deployment strategy before introducing production infrastructure.
+
+This repository documents implemented behavior separately from planned capabilities.
