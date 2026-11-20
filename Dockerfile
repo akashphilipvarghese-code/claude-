@@ -18,7 +18,8 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 tradeix
 
-COPY --from=builder /app/public ./public
+# This app has no public/ directory; Next.js standalone output contains the runtime assets.
+# Add a public/ copy only if the repository later introduces static public assets.
 COPY --from=builder --chown=tradeix:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=tradeix:nodejs /app/.next/static ./.next/static
 
