@@ -10,6 +10,45 @@ env:
   IMAGE_NAME: tradeix-interface
 
 jobs:
+  remediate-dependencies:
+    name: Remediate vulnerable npm dependencies
+    # Only trusted branches from this repository may receive write credentials.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'security/require-production-session-secret'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Apply non-breaking npm audit fixes
+        run: |
+          # npm audit fix returns 1 when unfixed advisories remain, even if it
+          # successfully updates the lockfile. Verify changes before committing.
+          npm audit fix --no-fund || echo "Some advisories require separate major-version upgrades; continuing with verification."
+      - name: Verify updated dependencies and app
+        run: |
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+      - name: Commit verified package updates
+        run: |
+          if git diff --quiet -- package.json package-lock.json; then
+            echo "No compatible dependency changes were available."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "fix(deps): update vulnerable npm dependencies"
+          git push origin HEAD:security/require-production-session-secret
+
   lint-and-test:
     name: Lint & Test
     runs-on: ubuntu-latest
@@ -17,16 +56,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - run: npm ci
       - run: npm run lint
-      - run: npm test -- --coverage
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage/
+      - run: npm test
 
   build:
     name: Build Next.js app
@@ -36,7 +70,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - run: npm ci
       - run: npm run build
